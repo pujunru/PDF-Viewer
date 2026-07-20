@@ -35,13 +35,11 @@ jobs:
           bundler-cache: true
           working-directory: app
 
-      - name: Cache CocoaPods
-        uses: actions/cache@v4
-        with:
-          path: app/macos/Pods
-          key: pods-${{ runner.os }}-${{ hashFiles('app/macos/Podfile.lock') }}
-          restore-keys: pods-${{ runner.os }}-
-
+      # Deliberately not cached. React Native's codegen writes generated sources
+      # both into Pods/ and into the build's DerivedSources; restoring a partial
+      # Pods/ makes `pod install` skip work the build then expects to exist, and
+      # xcodebuild fails with "Codegen did not run properly". A clean install
+      # costs about a minute and always matches the build.
       - name: Install pods
         working-directory: app/macos
         run: bundle exec pod install
@@ -54,6 +52,9 @@ jobs:
         working-directory: app/macos
         run: |
           set -o pipefail
+          # -quiet keeps the log to warnings and errors. xcodebuild otherwise
+          # echoes every full clang invocation, which buries the one line that
+          # says what actually failed.
           xcodebuild \
             -workspace PdfViewerApp.xcworkspace \
             -scheme PdfViewerApp-macOS \
@@ -62,6 +63,7 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
+            -quiet \
             build
 
       - name: Locate built app
