@@ -1,5 +1,20 @@
-require_relative '../node_modules/react-native-macos/scripts/react_native_pods'
-require_relative '../node_modules/@react-native-community/cli-platform-ios/native_modules'
+# This is an npm workspace, so dependencies may be installed under app/ or
+# hoisted to the repo root depending on the install. Asking Node to resolve the
+# packages finds them wherever they actually landed, instead of assuming
+# ../node_modules and breaking on a hoisted (e.g. CI) install.
+def node_package_dir(name)
+  require 'open3'
+  script = "console.log(require.resolve('#{name}/package.json'))"
+  out, status = Open3.capture2('node', '-e', script, chdir: __dir__)
+  raise "Cannot resolve #{name} — run `npm install` first" unless status.success?
+  File.dirname(out.strip)
+end
+
+RN_MACOS_PATH = node_package_dir('react-native-macos')
+
+require_relative File.join(RN_MACOS_PATH, 'scripts/react_native_pods')
+require_relative File.join(node_package_dir('@react-native-community/cli-platform-ios'),
+                           'native_modules')
 
 prepare_react_native_project!
 
@@ -11,7 +26,9 @@ target 'PdfViewerApp-macOS' do
   flags = get_default_flags()
 
   use_react_native!(
-    :path => '../node_modules/react-native-macos',
+    # use_react_native! joins this onto the Podfile's directory, so it must be
+    # relative to here — an absolute path would become "./Users/...".
+    :path => Pathname.new(RN_MACOS_PATH).relative_path_from(Pathname.new(__dir__)).to_s,
     :hermes_enabled => false,
     :fabric_enabled => ENV['RCT_NEW_ARCH_ENABLED'] == '1',
     # An absolute path to your application root.
