@@ -35,11 +35,20 @@ jobs:
           bundler-cache: true
           working-directory: app
 
-      # Deliberately not cached. React Native's codegen writes generated sources
-      # both into Pods/ and into the build's DerivedSources; restoring a partial
-      # Pods/ makes `pod install` skip work the build then expects to exist, and
-      # xcodebuild fails with "Codegen did not run properly". A clean install
-      # costs about a minute and always matches the build.
+      # React Native generates its Fabric sources into node_modules — notably
+      # react-native-macos/ReactCommon/react/renderer/components/rncore, whose
+      # absence makes the Fabric podspec fail the build with "Codegen did not
+      # run properly". Those files ship in no tarball and survive no `npm ci`,
+      # and pod install does not produce them for this workspace layout, so
+      # codegen is run explicitly rather than relied on as a side effect.
+      - name: Run React Native codegen
+        run: >
+          node node_modules/react-native-macos/scripts/generate-codegen-artifacts.js
+          -p app -t ios -o app/macos/build/generated
+
+      # Deliberately not cached: a restored Pods/ lets pod install skip work the
+      # build still expects, and the generated sources above would go stale
+      # against it. A clean install takes about a minute.
       - name: Install pods
         working-directory: app/macos
         run: bundle exec pod install
