@@ -1,0 +1,8 @@
+{
+  "name": "@pdf-viewer/viewer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The pdf.js viewer document and its assets, hosted identically by every shell.",
+  "main": "src/viewer.html",
+  "files": ["src"]
+}

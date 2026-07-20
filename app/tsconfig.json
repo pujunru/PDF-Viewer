@@ -1,0 +1,26 @@
+{
+  "extends": "@react-native/typescript-config/tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@pdf-viewer/*": ["../packages/*/src"],
+      // The package's root index.d.ts re-exports a platform-generic WebView
+      // whose props widen to `never` off-device, which makes every prop below
+      // fail to typecheck. Metro resolves the .macos implementation for this
+      // build; pointing tsc at its declaration keeps types and runtime aligned.
+      // npm hoists this to the repo root; both locations are listed so the
+      // path survives either resolution.
+      "react-native-webview": [
+        "../node_modules/react-native-webview/lib/WebView.macos",
+        "./node_modules/react-native-webview/lib/WebView.macos"
+      ],
+      "react-native-webview/*": [
+        "../node_modules/react-native-webview/lib/*",
+        "./node_modules/react-native-webview/lib/*"
+      ]
+    }
+  },
+  "include": ["App.tsx", "index.js", "src", "__tests__", "../packages/*/src"],
+  // PdfViewport.web.tsx is the browser half of the platform split; it renders a
+  // DOM <iframe>, which has no meaning under react-native.
+  "exclude": ["../packages/*/src/*.web.tsx"]
+}

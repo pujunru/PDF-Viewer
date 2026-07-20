@@ -1,0 +1,86 @@
+name: macOS
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # The React Native CLI is split across packages that require each other by
+      # bare name, and react-native-macos resolves from app/node_modules. The
+      # root install is what keeps that toolchain in one resolvable tree — see
+      # the "//nohoist" note in the root package.json.
+      - name: Install JS dependencies
+        run: npm ci
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: true
+          working-directory: app
+
+      - name: Cache CocoaPods
+        uses: actions/cache@v4
+        with:
+          path: app/macos/Pods
+          key: pods-${{ runner.os }}-${{ hashFiles('app/macos/Podfile.lock') }}
+          restore-keys: pods-${{ runner.os }}-
+
+      - name: Install pods
+        working-directory: app/macos
+        run: bundle exec pod install
+
+      # Unsigned: CI has no Apple Developer identity, and the artifact is for
+      # local testing rather than distribution. Signing is switched off
+      # explicitly so xcodebuild fails loudly on a real error instead of on a
+      # missing certificate.
+      - name: Build
+        working-directory: app/macos
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -workspace PdfViewerApp.xcworkspace \
+            -scheme PdfViewerApp-macOS \
+            -configuration Release \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Locate built app
+        id: app
+        run: |
+          APP=$(find app/macos/build/Build/Products/Release -maxdepth 1 -name '*.app' | head -1)
+          if [ -z "$APP" ]; then
+            echo "No .app produced" >&2
+            exit 1
+          fi
+          echo "path=$APP" >> "$GITHUB_OUTPUT"
+
+      # Zipping preserves the bundle's symlinks and executable bits, which
+      # upload-artifact would otherwise flatten into an unopenable directory.
+      - name: Package
+        run: ditto -c -k --keepParent "${{ steps.app.outputs.path }}" PdfViewerApp-macOS.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PdfViewerApp-macOS
+          path: PdfViewerApp-macOS.zip
+          if-no-files-found: error

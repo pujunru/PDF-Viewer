@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pure PDF Viewer</title>
+    <!-- Gaegu (700) is the sketch shell's face; see fontFamily in
+         @pdf-viewer/styles. Only the web shell loads it here — the native
+         shells register the font through their own asset pipelines. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Gaegu:wght@700&display=swap" rel="stylesheet" />
+    <style>
+      html, body, #root { margin: 0; padding: 0; height: 100%; }
+      /* AppRegistry.runApplication wraps the app in its own container div.
+         On native, SafeAreaView fills the window on its own; under
+         react-native-web it is a plain flex box, so without a flex chain from
+         #root down to it the shell's flex:1 body has no height to divide and
+         the document area collapses to zero. */
+      #root { display: flex; flex-direction: column; }
+      #root > * { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+      /* Matches `titlebar` (the paper base) in @pdf-viewer/styles, so the
+         window behind the shell never flashes a color the design doesn't use. */
+      body { background: #fcfcfb; overflow: hidden; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,65 @@
+name: Web
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Lets the Pages deploy be re-run from the Actions tab without a new commit.
+  workflow_dispatch:
+
+# Pages deploys need these; the default GITHUB_TOKEN is read-only for contents.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# A superseded deploy is worth cancelling, but never one already in flight —
+# cancelling mid-publish can leave the Pages site in a half-updated state.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # The workspace root owns the lockfile; npm ci installs every workspace.
+      - name: Install
+        run: npm ci
+
+      - name: Type-check
+        run: npm run typecheck --workspace @pdf-viewer/web
+
+      - name: Build
+        # Serving from https://<user>.github.io/<repo>/ means every asset URL
+        # needs the repo prefix. Derived from the repository name so a rename
+        # or a fork does not silently produce a broken site.
+        env:
+          BASE_PATH: /${{ github.event.repository.name }}/
+        run: npm run web:build
+
+      - name: Upload Pages artifact
+        # Only main publishes; PR builds stop after proving the build works.
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/web/dist
+
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Build output
+apps/web/dist/
+app/macos/build/
+app/macos/Pods/
+app/android/app/build/
+app/android/build/
+app/android/.gradle/
+app/ios/build/
+app/ios/Pods/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+
+# Metro / React Native
+.metro-health-check*
+*.jsbundle
+
+# Logs
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Local tooling state (launch.json is checked in; agent state is not)
+.claude/settings.local.json

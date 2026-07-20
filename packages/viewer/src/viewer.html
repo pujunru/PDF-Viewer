@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PDF Viewer</title>
+<style>
+  /* Kept in step with the sketch tokens in @pdf-viewer/styles by hand: this
+     document is copied verbatim into the bundle and cannot import them.
+     (viewerCssVars() in css.ts emits the same values for a host that does
+     inject them; nothing calls it today.) */
+  :root { --bg:#f4f4f2; --page-shadow:none; --page-border:1.5px solid #c9c9c4; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; height:100%; background:var(--bg); overflow:hidden; }
+  #scroll { position:absolute; inset:0; overflow:auto; padding:16px 0 40px; }
+  .page { position:relative; margin:0 auto 16px; background:#fff; box-shadow:var(--page-shadow); border:var(--page-border); }
+  .page canvas { display:block; }
+  /* pdf.js text layer */
+  /* font-size:0 on the layer collapses the <br> struts (see below); every span
+     carries its own inline font-size from pdf.js, so text is unaffected. */
+  .textLayer { position:absolute; inset:0; overflow:hidden; opacity:1; line-height:1;
+    font-size:0; text-align:initial; -webkit-user-select:text; user-select:text; }
+  .textLayer span { color:transparent; position:absolute; white-space:pre; cursor:text;
+    transform-origin:0 0; }
+  .textLayer span::selection { background:rgba(0,100,255,.3); }
+  /* pdf.js emits a <br> between lines. They stay in normal flow at the layer's
+     top-left rather than tracking the text they separate, so a selection
+     crossing them unions their 18px line boxes into a full-width blue band
+     over unrelated parts of the page. Zeroing the strut collapses them out of
+     the selection geometry while keeping them in the text stream, so copied
+     text still has its line breaks. */
+  .textLayer br { font-size:0; line-height:0; }
+  /* pdf.js's selection guard: a spacer that absorbs the selection past the
+     pointer. Without it a drag across a gap runs away and swallows every
+     span to the end of the page (and the far column). */
+  .textLayer .endOfContent { position:absolute; inset:100% 0 0; z-index:-1;
+    cursor:default; user-select:none; pointer-events:none; }
+  .textLayer.selecting .endOfContent { top:0; }
+  /* custom markup overlay */
+  .markLayer { position:absolute; inset:0; pointer-events:none; }
+  .markLayer .mark { position:absolute; pointer-events:auto; cursor:pointer; }
+  /* Highlights sit above the canvas, so they must be translucent for the
+     glyphs to read through. multiply keeps black text black instead of
+     washing it toward the highlight color. */
+  .markLayer .mark.highlight { mix-blend-mode:multiply; }
+  /* search highlight — drawn on an overlay using real client rects
+     (nesting spans inside the transform-scaled text layer misaligns them) */
+  .searchLayer { position:absolute; inset:0; pointer-events:none; z-index:2; }
+  .searchLayer .search-hit { position:absolute; background:rgba(255,220,0,.45); border-radius:2px; }
+  .searchLayer .search-hit.current { background:rgba(255,150,0,.75); }
+  /* ink + freetext live in an editor layer */
+  .editLayer { position:absolute; inset:0; }
+  .editLayer.ink { cursor:crosshair; }
+  /* Freetext places a box where you click, so the caret is the honest cursor —
+     without it the armed tool gives no feedback at all over the page. */
+  .editLayer.freetext { cursor:text; }
+  .editLayer.inactive { pointer-events:none; }
+  /* The ink SVG spans the whole layer and outlives the ink tool (it holds the
+     strokes already drawn). It is a canvas, not a target: without this it sits
+     on top of .editLayer and swallows the pointerdown that freetext needs to
+     place a text box. */
+  .editLayer svg { pointer-events:none; }
+  /* Boxes stay reachable whatever the current tool is, so an existing one can
+     always be selected and edited — hence pointer-events:auto, which overrides
+     .editLayer.inactive above. Width is author-set and height follows the
+     wrapped content, so `height` is never written: overflow-wrap keeps long
+     words inside the chosen width instead of widening the box. */
+  .ftBox { position:absolute; min-width:40px; max-width:100%;
+    cursor:text; pointer-events:auto;
+    border:1px dashed transparent; padding:2px 4px;
+    font:14px/1.3 sans-serif; color:#111; outline:none;
+    white-space:pre-wrap; overflow-wrap:break-word; }
+  .ftBox:hover { border-color:#aaa; }
+  /* Selected: a solid rule plus the handles. Kept visually quiet — the box
+     sits over the page, so the selection must not compete with the document. */
+  .ftBox.selected { border:1px solid #4a90d9; background:rgba(255,255,255,.75); }
+
+  /* Handles are chrome, not content: they only appear on hover or while
+     selected, so a finished box is just text on the page. display:none rather
+     than opacity keeps them out of the hit-test when hidden. */
+  .ftGrip, .ftMove { display:none; pointer-events:auto; }
+  .ftBox:hover .ftGrip, .ftBox.selected .ftGrip,
+  .ftBox:hover .ftMove, .ftBox.selected .ftMove { display:block; }
+
+  .ftGrip { position:absolute; width:12px; height:100%; top:0; right:-6px;
+    cursor:ew-resize; }
+  .ftGrip::after { content:''; position:absolute; top:50%; right:4px;
+    width:4px; height:18px; margin-top:-9px; border-radius:2px; background:#4a90d9; }
+
+  /* The box is contentEditable, so a press inside it must place the caret —
+     moving needs its own target. It sits just outside the top-left corner so it
+     never covers the text. */
+  .ftMove { position:absolute; width:16px; height:16px; left:-8px; top:-8px;
+    border-radius:3px; background:#4a90d9; cursor:move; }
+  .ftMove::after { content:''; position:absolute; inset:4px;
+    border:1.5px solid #fff; border-radius:1px; }
+  #loading { position:absolute; inset:0; display:flex; align-items:center;
+    justify-content:center; color:#ddd; font:14px sans-serif; }
+  #error { position:absolute; inset:0; display:none; align-items:center;
+    justify-content:center; color:#f88; font:14px sans-serif; padding:24px; text-align:center; }
+</style>
+</head>
+<body>
+<div id="scroll"><div id="pages"></div></div>
+<div id="loading">Loading engine…</div>
+<div id="error"></div>
+
+<script type="module">
+import * as pdfjsLib from './build/pdf.mjs';
+pdfjsLib.GlobalWorkerOptions.workerSrc = './build/pdf.worker.mjs';
+
+// ---- bridge to the host shell ----
+// This document is hosted two ways: inside a react-native-webview (macOS) and
+// inside an <iframe> (web). Both deliver inbound messages as 'message' events,
+// so only the outbound channel has to be chosen — RN exposes
+// ReactNativeWebView.postMessage; in a frame we post to the parent window.
+const RN = window.ReactNativeWebView;
+const post = RN && RN.postMessage
+  ? (type, payload) => RN.postMessage(JSON.stringify({ type, payload }))
+  : (type, payload) => window.parent.postMessage(
+      JSON.stringify({ type, payload }),
+      // The shell serves this document from its own origin; posting back to
+      // that same origin keeps the message from leaking to a foreign embedder.
+      window.location.origin,
+    );
+function onMessage(handler) {
+  const dispatch = (e) => {
+    let data = e.data;
+    if (typeof data !== 'string') return;
+    let m; try { m = JSON.parse(data); } catch { return; }
+    if (m && m.type) handler(m);
+  };
+  window.addEventListener('message', dispatch);
+  document.addEventListener('message', dispatch); // Android/macOS quirk
+}
+
+// ---- state ----
+const state = {
+  doc: null,
+  scale: 1.2,
+  pages: [],          // {num, container, viewport, textLayerDiv, markLayer}
+  tool: 'none',       // none|highlight|underline|strikeout|ink|freetext
+  color: '#ffd400',
+  dirty: false,
+  marks: [],          // {page, type, color, rects:[{x,y,w,h}] normalized}
+  inks: [],           // {page, color, paths:[[{x,y}...]] normalized}
+  texts: [],          // {page, color, size, x,y,w, text} normalized geometry
+  fontSize: 16,       // default size for new boxes, in px at scale 1
+  selectedText: null, // the entry in `texts` currently selected, if any
+  search: { term:'', hits:[], idx:-1 },
+};
+
+function setDirty(v){ if(state.dirty!==v){ state.dirty=v; post('dirty',{dirty:v}); } }
+
+const pagesEl = document.getElementById('pages');
+const loadingEl = document.getElementById('loading');
+const errorEl = document.getElementById('error');
+
+function base64ToBytes(b64){
+  const bin = atob(b64);
+  const len = bin.length;
+  const out = new Uint8Array(len);
+  for (let i=0;i<len;i++) out[i]=bin.charCodeAt(i);
+  return out;
+}
+
+// ---------- load ----------
+async function loadDocument(base64) {
+  try {
+    loadingEl.style.display='flex'; loadingEl.textContent='Rendering…';
+    errorEl.style.display='none';
+    pagesEl.innerHTML=''; state.pages=[]; state.marks=[]; state.inks=[]; state.texts=[];
+    let bytes;
+    if (base64 === '@sample') {
+      const resp = await fetch('./sample.pdf');
+      bytes = new Uint8Array(await resp.arrayBuffer());
+    } else {
+      bytes = base64ToBytes(base64);
+    }
+    state.doc = await pdfjsLib.getDocument({
+      data: bytes,
+      cMapUrl: './web/cmaps/', cMapPacked:true,
+      standardFontDataUrl:'./web/standard_fonts/',
+    }).promise;
+    for (let n=1; n<=state.doc.numPages; n++) await renderPage(n);
+    loadingEl.style.display='none';
+    setDirty(false);
+    post('loaded', { pageCount: state.doc.numPages });
+  } catch (err) {
+    loadingEl.style.display='none';
+    errorEl.style.display='flex';
+    errorEl.textContent = 'Could not open PDF: ' + (err && err.message || err);
+    post('error', { message: String(err && err.message || err) });
+  }
+}
+
+async function renderPage(num) {
+  const page = await state.doc.getPage(num);
+  const viewport = page.getViewport({ scale: state.scale });
+  const container = document.createElement('div');
+  container.className='page'; container.dataset.page=num;
+  container.style.width = viewport.width+'px';
+  container.style.height = viewport.height+'px';
+
+  const canvas = document.createElement('canvas');
+  const ratio = window.devicePixelRatio || 1;
+  canvas.width = Math.floor(viewport.width*ratio);
+  canvas.height = Math.floor(viewport.height*ratio);
+  canvas.style.width = viewport.width+'px';
+  canvas.style.height = viewport.height+'px';
+  const ctx = canvas.getContext('2d');
+  container.appendChild(canvas);
+
+  const textLayerDiv = document.createElement('div');
+  textLayerDiv.className='textLayer';
+  container.appendChild(textLayerDiv);
+
+  const markLayer = document.createElement('div');
+  markLayer.className='markLayer';
+  container.appendChild(markLayer);
+
+  const searchLayer = document.createElement('div');
+  searchLayer.className='searchLayer';
+  container.appendChild(searchLayer);
+
+  const editLayer = document.createElement('div');
+  editLayer.className='editLayer inactive';
+  container.appendChild(editLayer);
+
+  pagesEl.appendChild(container);
+  const rec = { num, container, viewport, textLayerDiv, markLayer, searchLayer, editLayer, canvas };
+  state.pages[num-1] = rec;
+
+  await page.render({ canvasContext: ctx, viewport, transform: ratio!==1?[ratio,0,0,ratio,0,0]:null }).promise;
+
+  // text layer for selection + search (pdf.js v4 TextLayer class API).
+  // v4 positions each span using the CSS var --scale-factor; without it the
+  // text layer defaults to scale 1 and drifts out of sync with the canvas
+  // (which is what threw the search-highlight boxes off).
+  textLayerDiv.style.setProperty('--scale-factor', String(state.scale));
+  const textContent = await page.getTextContent();
+  const textLayer = new pdfjsLib.TextLayer({
+    textContentSource: textContent, container: textLayerDiv, viewport,
+  });
+  await textLayer.render();
+  attachSelectionGuard(textLayerDiv);
+
+  attachEditHandlers(rec);
+  redrawMarks(rec);
+}
+
+// Selection guard, mirroring what pdf.js's own viewer does around TextLayer.
+// The trailing .endOfContent div sits below the layer until a drag starts;
+// pulling it to top:0 during the drag gives the selection somewhere inert to
+// land when the pointer is over a gap, instead of running on through every
+// following span (which is what made cross-column drags select the page).
+function attachSelectionGuard(textLayerDiv){
+  const end = document.createElement('div');
+  end.className = 'endOfContent';
+  textLayerDiv.appendChild(end);
+  textLayerDiv.addEventListener('pointerdown', ()=>{
+    textLayerDiv.classList.add('selecting');
+  });
+}
+// Released once, globally: pages re-render on every zoom change, so a
+// per-page document listener would pile up one leak per page per zoom.
+document.addEventListener('pointerup', ()=>{
+  for(const el of document.querySelectorAll('.textLayer.selecting')){
+    el.classList.remove('selecting');
+  }
+});
+
+// ---------- coordinate helpers (normalized 0..1 of page box) ----------
+function pxToNorm(rec, x, y){ return { x:x/rec.viewport.width, y:y/rec.viewport.height }; }
+function normRectToPx(rec, r){
+  return { x:r.x*rec.viewport.width, y:r.y*rec.viewport.height,
+           w:r.w*rec.viewport.width, h:r.h*rec.viewport.height };
+}
+
+// ---------- text markup: highlight / underline / strikeout ----------
+function currentSelectionRectsForPage(rec) {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount===0 || sel.isCollapsed) return null;
+  const range = sel.getRangeAt(0);
+  if (!rec.textLayerDiv.contains(range.commonAncestorContainer) &&
+      !rec.container.contains(range.commonAncestorContainer)) return null;
+  const pageBox = rec.container.getBoundingClientRect();
+  const rects = [];
+  for (const r of range.getClientRects()) {
+    if (r.width<1 || r.height<1) continue;
+    rects.push({ x:r.left-pageBox.left, y:r.top-pageBox.top, w:r.width, h:r.height });
+  }
+  return rects.length?rects:null;
+}
+
+function applyTextMark(type) {
+  for (const rec of state.pages) {
+    if (!rec) continue;
+    const rects = currentSelectionRectsForPage(rec);
+    if (!rects) continue;
+    const norm = rects.map(px=>({
+      x:px.x/rec.viewport.width, y:px.y/rec.viewport.height,
+      w:px.w/rec.viewport.width, h:px.h/rec.viewport.height,
+    }));
+    state.marks.push({ page:rec.num, type, color:state.color, rects:norm });
+    redrawMarks(rec);
+    setDirty(true);
+  }
+  window.getSelection().removeAllRanges();
+}
+
+// '#rrggbb' -> 'rgba(r,g,b,a)'. Colors arrive from the toolbar as opaque hex.
+function withAlpha(hex, a){
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex||'').trim());
+  if (!m) { return hex; }
+  const n = parseInt(m[1],16);
+  return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;
+}
+
+function redrawMarks(rec) {
+  rec.markLayer.innerHTML='';
+  for (const m of state.marks.filter(m=>m.page===rec.num)) {
+    for (const nr of m.rects) {
+      const p = normRectToPx(rec, nr);
+      const el = document.createElement('div');
+      el.className='mark '+m.type;
+      el.style.left=p.x+'px'; el.style.top=p.y+'px'; el.style.width=p.w+'px';
+      if (m.type==='highlight'){ el.style.height=p.h+'px'; el.style.background=withAlpha(m.color,0.45); }
+      else if (m.type==='underline'){ el.style.top=(p.y+p.h-2)+'px'; el.style.height='2px'; el.style.background=m.color; }
+      else if (m.type==='strikeout'){ el.style.top=(p.y+p.h/2-1)+'px'; el.style.height='2px'; el.style.background=m.color; }
+      el.title='Click to delete annotation';
+      el.addEventListener('click',()=>{ deleteMark(m); });
+      rec.markLayer.appendChild(el);
+    }
+  }
+}
+function deleteMark(m){
+  const i=state.marks.indexOf(m); if(i>=0){ state.marks.splice(i,1);
+    const rec=state.pages[m.page-1]; redrawMarks(rec); setDirty(true); }
+}
+
+// ---------- freetext boxes ----------
+/** Width a new box starts at, in CSS px at scale 1. */
+const DEFAULT_TEXT_W = 160;
+
+/**
+ * Builds the DOM for one text entry and wires editing, selection and resize.
+ * Both creation and restore-after-rerender go through here, so a box behaves
+ * the same however it came to exist.
+ *
+ * Geometry is stored normalized (0..1 of the viewport) so it survives zoom;
+ * only width is stored — height always follows the wrapped text.
+ */
+function buildTextBox(rec, entry){
+  const box=document.createElement('div');
+  box.className='ftBox';
+  box.contentEditable='true';
+  box._entry=entry; // back-reference, so a style patch can find this box again
+  box.style.left=(entry.x*rec.viewport.width)+'px';
+  box.style.top=(entry.y*rec.viewport.height)+'px';
+  box.style.width=((entry.w||DEFAULT_TEXT_W/rec.viewport.width)*rec.viewport.width)+'px';
+  box.style.color=entry.color;
+  box.style.fontSize=((entry.size||16)*state.scale)+'px';
+  if (entry.text) box.innerText=entry.text;
+
+  box.addEventListener('input',()=>{ entry.text=box.innerText; setDirty(true); });
+  // Selecting on pointerdown (not click) so the panel updates before the caret
+  // lands, and so a drag that starts on the box selects it too.
+  box.addEventListener('pointerdown',(e)=>{ e.stopPropagation(); selectText(entry,box); });
+  // An empty box is not worth keeping: drop it once it loses focus, unless the
+  // blur was caused by grabbing its own resize grip.
+  box.addEventListener('blur',()=>{
+    if (box._resizing) return;
+    if (!box.innerText.trim()){
+      const i=state.texts.indexOf(entry); if(i>=0) state.texts.splice(i,1);
+      if (state.selectedText===entry) selectText(null,null);
+      box.remove();
+    }
+  });
+
+  /**
+   * Wires one handle as a drag source. Both handles live inside a
+   * contentEditable box, so both must suppress the default (which would move
+   * the caret and turn the drag into a text selection) and both mark the box
+   * as busy so the blur handler does not delete it mid-drag.
+   */
+  const onDrag=(handle,onMove)=>{
+    handle.contentEditable='false';
+    handle.addEventListener('pointerdown',(e)=>{
+      e.preventDefault(); e.stopPropagation();
+      selectText(entry,box);
+      box._resizing=true;
+      const start={x:e.clientX,y:e.clientY,r:box.getBoundingClientRect()};
+      handle.setPointerCapture(e.pointerId);
+      const move=(ev)=>onMove(ev.clientX-start.x, ev.clientY-start.y, start.r);
+      const up=()=>{
+        handle.removeEventListener('pointermove',move);
+        handle.removeEventListener('pointerup',up);
+        box._resizing=false; setDirty(true);
+      };
+      handle.addEventListener('pointermove',move);
+      handle.addEventListener('pointerup',up);
+    });
+    box.appendChild(handle);
+  };
+
+  const grip=document.createElement('div');
+  grip.className='ftGrip';
+  onDrag(grip,(dx,_dy,r)=>{
+    const w=Math.max(40,r.width+dx);
+    box.style.width=w+'px';
+    entry.w=w/rec.viewport.width;
+  });
+
+  const mover=document.createElement('div');
+  mover.className='ftMove';
+  mover.title='Drag to move';
+  onDrag(mover,(dx,dy)=>{
+    // Origin is stored normalized, so convert the pixel delta once and clamp to
+    // the page: a box dragged off the edge would be unreachable afterwards.
+    const x=Math.max(0,Math.min(rec.viewport.width-8,(entry.x*rec.viewport.width)+dx));
+    const y=Math.max(0,Math.min(rec.viewport.height-8,(entry.y*rec.viewport.height)+dy));
+    box.style.left=x+'px'; box.style.top=y+'px';
+    box._pending={x,y};
+  });
+  // The move handler works from the entry's committed origin, so the entry is
+  // only updated once the drag ends — otherwise each move would compound.
+  mover.addEventListener('pointerup',()=>{
+    if (box._pending){
+      entry.x=box._pending.x/rec.viewport.width;
+      entry.y=box._pending.y/rec.viewport.height;
+      box._pending=null;
+    }
+  });
+
+  rec.container.appendChild(box);
+  return box;
+}
+
+/** Marks one box as the selection and tells the shell, which drives the panel. */
+function selectText(entry, box){
+  if (state.selectedText===entry && !box) return; // nothing to clear
+  for (const el of document.querySelectorAll('.ftBox.selected')) el.classList.remove('selected');
+  state.selectedText = entry;
+  if (box) box.classList.add('selected');
+  post('textSelection', { selected: !!entry,
+    color: entry?entry.color:null, size: entry?(entry.size||16):null });
+}
+
+/** Applies panel edits to the current selection. */
+function styleSelectedText(patch){
+  const entry=state.selectedText; if(!entry) return;
+  if (patch.color!=null) entry.color=patch.color;
+  if (patch.size!=null) entry.size=patch.size;
+  const rec=state.pages[entry.page-1]; if(!rec) return;
+  for (const box of rec.container.querySelectorAll('.ftBox')){
+    if (box._entry!==entry) continue;
+    if (patch.color!=null) box.style.color=entry.color;
+    if (patch.size!=null) box.style.fontSize=(entry.size*state.scale)+'px';
+  }
+  setDirty(true);
+}
+
+// ---------- ink + freetext ----------
+function attachEditHandlers(rec) {
+  const layer = rec.editLayer;
+  // ink
+  let drawing=false, path=null, svg=null;
+  layer.addEventListener('pointerdown',(e)=>{
+    // A press that lands anywhere but a box clears the selection, whatever
+    // tool is active — otherwise the panel would keep editing an invisible
+    // selection after the user has moved on.
+    if (!(e.target.closest && e.target.closest('.ftBox,.ftGrip'))) selectText(null,null);
+    if (state.tool==='ink'){
+      drawing=true; path=[];
+      svg = svg || ensureInkSvg(rec);
+      const poly=document.createElementNS('http://www.w3.org/2000/svg','polyline');
+      poly.setAttribute('fill','none'); poly.setAttribute('stroke',state.color);
+      poly.setAttribute('stroke-width','2'); poly.setAttribute('stroke-linecap','round');
+      poly.setAttribute('stroke-linejoin','round');
+      svg.appendChild(poly); layer._activePoly=poly;
+      addInkPoint(rec,e,path,poly);
+    } else if (state.tool==='freetext'){
+      // Clicking an existing box (or its grip) must not spawn another one on
+      // top of it; those targets handle themselves.
+      if (e.target.closest && e.target.closest('.ftBox,.ftGrip')) return;
+      // pointerdown is followed by mousedown, whose default action moves focus
+      // to the layer under the cursor. That blurs the box we are about to
+      // focus, and the blur handler below deletes it for being empty — so the
+      // box vanishes before a key can be pressed. Suppressing the default
+      // keeps focus where we put it.
+      e.preventDefault();
+      const rectp=rec.container.getBoundingClientRect();
+      const x=e.clientX-rectp.left, y=e.clientY-rectp.top;
+      const entry={ page:rec.num, color:state.color, size:state.fontSize,
+        x:x/rec.viewport.width, y:y/rec.viewport.height,
+        w:DEFAULT_TEXT_W/rec.viewport.width, text:'' };
+      state.texts.push(entry);
+      const box=buildTextBox(rec,entry);
+      selectText(entry,box);
+      box.focus();
+      setDirty(true);
+    }
+  });
+  layer.addEventListener('pointermove',(e)=>{
+    if (drawing && path){ addInkPoint(rec,e,path,layer._activePoly); }
+  });
+  const finish=()=>{ if(drawing&&path&&path.length>1){ state.inks.push({page:rec.num,color:state.color,path:path.slice()}); setDirty(true);} drawing=false; path=null; };
+  layer.addEventListener('pointerup',finish);
+  layer.addEventListener('pointerleave',finish);
+}
+function ensureInkSvg(rec){
+  let svg=rec.editLayer.querySelector('svg');
+  if(!svg){ svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
+    svg.setAttribute('width','100%'); svg.setAttribute('height','100%');
+    svg.style.position='absolute'; svg.style.inset='0'; rec.editLayer.appendChild(svg); }
+  return svg;
+}
+function addInkPoint(rec,e,path,poly){
+  const rectp=rec.container.getBoundingClientRect();
+  const x=e.clientX-rectp.left, y=e.clientY-rectp.top;
+  path.push({ x:x/rec.viewport.width, y:y/rec.viewport.height });
+  const pts=path.map(p=>`${p.x*rec.viewport.width},${p.y*rec.viewport.height}`).join(' ');
+  poly.setAttribute('points',pts);
+}
+
+// ---------- tool switching ----------
+function setTool(tool,color){
+  state.tool=tool; if(color)state.color=color;
+  for(const rec of state.pages){ if(!rec)continue;
+    const active = (tool==='ink'||tool==='freetext');
+    rec.editLayer.classList.toggle('inactive',!active);
+    rec.editLayer.classList.toggle('ink',tool==='ink');
+    rec.editLayer.classList.toggle('freetext',tool==='freetext');
+    // text selection tools need the textLayer to receive pointer events (default)
+    rec.textLayerDiv.style.pointerEvents = (tool==='ink'||tool==='freetext')?'none':'auto';
+  }
+}
+
+// selection-based tools apply on mouseup
+document.addEventListener('mouseup',()=>{
+  if(state.tool==='highlight'||state.tool==='underline'||state.tool==='strikeout'){
+    applyTextMark(state.tool);
+  }
+});
+
+// ---------- search ----------
+// Highlights are drawn as boxes on a dedicated overlay, positioned from the
+// real client rects of a DOM Range over the matched text. This avoids the
+// misalignment you get from nesting spans inside pdf.js's transform-scaled
+// text layer (the inner span doesn't inherit the scaleX and shifts).
+function clearSearch(){
+  for(const rec of state.pages){ if(rec) rec.searchLayer.innerHTML=''; }
+  state.search={ term:'', hits:[], idx:-1 };
+}
+
+// Search within each text node independently and build a Range per match.
+// Matching per-node (rather than across a page-wide concatenation) keeps each
+// Range inside a single span, so getClientRects() returns exactly the box(es)
+// for that word — no stray rects from ranges accidentally spanning to page end.
+function findHitsInPage(rec, term){
+  const hits=[];
+  const needle=term.toLowerCase();
+  if(!needle) return hits;
+  const walker=document.createTreeWalker(rec.textLayerDiv, NodeFilter.SHOW_TEXT);
+  let node;
+  while((node=walker.nextNode())){
+    const hay=node.textContent.toLowerCase();
+    let from=0, idx;
+    while((idx=hay.indexOf(needle, from))!==-1){
+      const range=document.createRange();
+      range.setStart(node, idx);
+      range.setEnd(node, idx+needle.length);
+      hits.push({rec, range});
+      from=idx+needle.length;
+    }
+  }
+  return hits;
+}
+
+function drawHit(hit){
+  const pageBox=hit.rec.container.getBoundingClientRect();
+  const els=[];
+  for(const r of hit.range.getClientRects()){
+    if(r.width<0.5||r.height<0.5) continue;
+    const el=document.createElement('div'); el.className='search-hit';
+    el.style.left=(r.left-pageBox.left)+'px';
+    el.style.top=(r.top-pageBox.top)+'px';
+    el.style.width=r.width+'px';
+    el.style.height=r.height+'px';
+    hit.rec.searchLayer.appendChild(el); els.push(el);
+  }
+  hit.els=els;
+}
+
+function runSearch(term){
+  clearSearch();
+  if(!term){ post('search',{current:0,total:0}); return; }
+  state.search.term=term;
+  // Force layout to settle before reading client rects — otherwise rects
+  // can come back stale/scattered right after the text layer is appended.
+  void pagesEl.offsetHeight;
+  const hits=[];
+  for(const rec of state.pages){ if(!rec)continue;
+    for(const h of findHitsInPage(rec, term)){ drawHit(h); hits.push(h); }
+  }
+  state.search.hits=hits; state.search.idx=hits.length?0:-1;
+  focusHit(); post('search',{current:hits.length?1:0,total:hits.length});
+}
+function focusHit(){
+  state.search.hits.forEach((h,i)=>{
+    (h.els||[]).forEach(el=>el.classList.toggle('current', i===state.search.idx));
+  });
+  const cur=state.search.hits[state.search.idx];
+  if(cur&&cur.els&&cur.els[0]) cur.els[0].scrollIntoView({block:'center',behavior:'smooth'});
+}
+function stepSearch(dir){
+  const n=state.search.hits.length; if(!n)return;
+  state.search.idx=(state.search.idx+dir+n)%n; focusHit();
+  post('search',{current:state.search.idx+1,total:n});
+}
+
+// ---------- zoom ----------
+async function setZoom(scale){
+  state.scale=Math.max(0.4,Math.min(4,scale));
+  const marks=state.marks, inks=state.inks, texts=state.texts, doc=state.doc;
+  pagesEl.innerHTML=''; state.pages=[];
+  state.marks=marks; state.inks=inks; state.texts=texts;
+  for(let n=1;n<=doc.numPages;n++) await renderPage(n);
+  // re-draw inks & texts after re-render
+  for(const rec of state.pages){ if(rec){ redrawInks(rec); redrawTexts(rec); } }
+  if(state.search.term) runSearch(state.search.term);
+  post('zoom',{scale:state.scale});
+}
+function redrawInks(rec){
+  const my=state.inks.filter(k=>k.page===rec.num); if(!my.length)return;
+  const svg=ensureInkSvg(rec);
+  for(const k of my){ const poly=document.createElementNS('http://www.w3.org/2000/svg','polyline');
+    poly.setAttribute('fill','none'); poly.setAttribute('stroke',k.color);
+    poly.setAttribute('stroke-width','2'); poly.setAttribute('stroke-linecap','round');
+    poly.setAttribute('points',k.path.map(p=>`${p.x*rec.viewport.width},${p.y*rec.viewport.height}`).join(' '));
+    svg.appendChild(poly); }
+}
+function redrawTexts(rec){
+  const my=state.texts.filter(t=>t.page===rec.num);
+  for(const t of my){
+    const box=buildTextBox(rec,t);
+    if (state.selectedText===t) box.classList.add('selected');
+  }
+}
+
+// ---------- save (collect model; RN persists via pdf-lib in Phase 7) ----------
+function collectAnnotations(){
+  return { marks:state.marks, inks:state.inks, texts:state.texts };
+}
+
+// ---------- trackpad pinch-to-zoom ----------
+// WebKit (and Chromium) report a trackpad pinch gesture as a 'wheel' event
+// with ctrlKey=true, deltaY carrying the pinch magnitude. This is the
+// standard cross-browser signal for pinch-zoom (there is no separate
+// gesture API surfaced to page JS in a WKWebView).
+let zoomDebounce = null;
+let pinchPreview = 1;
+const scrollEl = document.getElementById('scroll');
+scrollEl.addEventListener('wheel', (e) => {
+  if (!e.ctrlKey) return; // plain two-finger scroll: let it scroll normally
+  e.preventDefault();
+  // Instant CSS-scale preview while the gesture is in flight (cheap),
+  // then commit a real re-render (crisp canvases) once it settles.
+  pinchPreview *= (1 - e.deltaY * 0.01);
+  pinchPreview = Math.max(0.5, Math.min(2, pinchPreview));
+  pagesEl.style.transform = `scale(${pinchPreview})`;
+  pagesEl.style.transformOrigin = '50% 0';
+  const next = state.scale * pinchPreview;
+  clearTimeout(zoomDebounce);
+  zoomDebounce = setTimeout(() => {
+    pagesEl.style.transform = '';
+    pinchPreview = 1;
+    setZoom(next);
+  }, 150);
+}, { passive: false });
+
+// ---------- message router ----------
+onMessage((m)=>{
+  switch(m.type){
+    case 'load': loadDocument(m.payload.base64); break;
+    case 'setTool': setTool(m.payload.tool, m.payload.color); break;
+    // Color and size set the default for new boxes and, per the panel's
+    // behavior, also restyle the current selection if there is one.
+    case 'setColor':
+      state.color=m.payload.color;
+      styleSelectedText({color:m.payload.color});
+      break;
+    case 'setFontSize':
+      state.fontSize=m.payload.size;
+      styleSelectedText({size:m.payload.size});
+      break;
+    case 'search': runSearch(m.payload.term); break;
+    case 'searchStep': stepSearch(m.payload.dir); break;
+    case 'zoomIn': setZoom(state.scale+0.2); break;
+    case 'zoomOut': setZoom(state.scale-0.2); break;
+    case 'save': post('annotations', collectAnnotations()); break;
+    case 'ping': post('pong',{}); break;
+  }
+});
+
+loadingEl.textContent='Ready';
+post('ready',{});
+</script>
+</body>
+</html>
