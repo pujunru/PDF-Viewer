@@ -11,6 +11,8 @@ def node_package_dir(name)
 end
 
 RN_MACOS_PATH = node_package_dir('react-native-macos')
+RN_MACOS_RELATIVE_PATH = Pathname.new(RN_MACOS_PATH)
+                                 .relative_path_from(Pathname.new(__dir__)).to_s
 
 require_relative File.join(RN_MACOS_PATH, 'scripts/react_native_pods')
 require_relative File.join(node_package_dir('@react-native-community/cli-platform-ios'),
@@ -28,7 +30,7 @@ target 'PdfViewerApp-macOS' do
   use_react_native!(
     # use_react_native! joins this onto the Podfile's directory, so it must be
     # relative to here — an absolute path would become "./Users/...".
-    :path => Pathname.new(RN_MACOS_PATH).relative_path_from(Pathname.new(__dir__)).to_s,
+    :path => RN_MACOS_RELATIVE_PATH,
     :hermes_enabled => false,
     :fabric_enabled => ENV['RCT_NEW_ARCH_ENABLED'] == '1',
     # An absolute path to your application root.
@@ -36,6 +38,9 @@ target 'PdfViewerApp-macOS' do
   )
 
   post_install do |installer|
-    react_native_post_install(installer)
+    # The helper defaults to ../node_modules/react-native. In this workspace
+    # that package also exists, but the macOS pods and generated rncore sources
+    # come from react-native-macos, so the build setting must use the same path.
+    react_native_post_install(installer, RN_MACOS_RELATIVE_PATH)
   end
 end
