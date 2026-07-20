@@ -53,6 +53,17 @@ jobs:
         working-directory: app/macos
         run: bundle exec pod install
 
+      # Temporary: report where rncore actually is, and what REACT_NATIVE_PATH
+      # the podspec guard will resolve against.
+      - name: Diagnose codegen output
+        run: |
+          echo "--- rncore under root node_modules ---"
+          ls node_modules/react-native-macos/ReactCommon/react/renderer/components/rncore 2>&1 | head -5 || true
+          echo "--- any rncore anywhere ---"
+          find . -type d -name rncore -not -path '*/Pods/*' 2>/dev/null | head -10
+          echo "--- REACT_NATIVE_PATH in generated xcconfig ---"
+          grep -rh "REACT_NATIVE_PATH" app/macos/Pods/Target\ Support\ Files/ 2>/dev/null | sort -u | head -5
+
       # Unsigned: CI has no Apple Developer identity, and the artifact is for
       # local testing rather than distribution. Signing is switched off
       # explicitly so xcodebuild fails loudly on a real error instead of on a
