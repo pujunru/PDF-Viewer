@@ -76,8 +76,8 @@ jobs:
           # echoes every full clang invocation, which buries the one line that
           # says what actually failed.
           xcodebuild \
-            -workspace PdfViewerApp.xcworkspace \
-            -scheme PdfViewerApp-macOS \
+            -workspace PDFViewer.xcworkspace \
+            -scheme PDFViewer-macOS \
             -configuration Release \
             -derivedDataPath build \
             CODE_SIGN_IDENTITY="" \
@@ -99,10 +99,10 @@ jobs:
       # Zipping preserves the bundle's symlinks and executable bits, which
       # upload-artifact would otherwise flatten into an unopenable directory.
       - name: Package
-        run: ditto -c -k --keepParent "${{ steps.app.outputs.path }}" PdfViewerApp-macOS.zip
+        run: ditto -c -k --keepParent "${{ steps.app.outputs.path }}" PDF-Viewer-macOS.zip
 
       - uses: actions/upload-artifact@v4
         with:
-          name: PdfViewerApp-macOS
-          path: PdfViewerApp-macOS.zip
+          name: PDF-Viewer-macOS
+          path: PDF-Viewer-macOS.zip
           if-no-files-found: error

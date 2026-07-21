@@ -20,9 +20,9 @@ function Root() {
 
 // Registering through AppRegistry (rather than rendering directly) lets
 // react-native-web inject the style sheet it generates from StyleSheet.create.
-AppRegistry.registerComponent('PdfViewerApp', () => Root);
+AppRegistry.registerComponent('PDFViewer', () => Root);
 
 const root = document.getElementById('root')!;
-AppRegistry.runApplication('PdfViewerApp', {rootTag: root});
+AppRegistry.runApplication('PDFViewer', {rootTag: root});
 
 export {createRoot}; // keep react-dom in the graph for RNW's renderer

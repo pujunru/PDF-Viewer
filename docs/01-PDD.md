@@ -1,4 +1,4 @@
-# Product Definition Document (PDD) — Pure PDF Viewer
+# Product Definition Document (PDD) — PDF Viewer
 
 **Version:** 1.0
 **Date:** 2026-07-17

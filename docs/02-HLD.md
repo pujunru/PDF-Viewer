@@ -1,4 +1,4 @@
-# High-Level Design (HLD) — Pure PDF Viewer
+# High-Level Design (HLD) — PDF Viewer
 
 **Version:** 1.0
 **Date:** 2026-07-17

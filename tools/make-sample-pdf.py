@@ -13,8 +13,8 @@ from pathlib import Path
 # Rendered with the Type1 base-14 fonts, which every PDF reader has built in —
 # no font embedding, so the file stays small and fully self-contained.
 PAGES = [
-    ("Pure PDF Viewer", [
-        ("H", "Pure PDF Viewer"),
+    ("PDF Viewer", [
+        ("H", "PDF Viewer"),
         ("P", "A sample document, generated for this repository."),
         ("P", "It carries no third-party content: every page here exists"),
         ("P", "to exercise the viewer itself."),
@@ -120,7 +120,7 @@ def build() -> bytes:
                           % (len(page_ids), kids))
 
     catalog = add(b"<< /Type /Catalog /Pages %d 0 R >>" % pages_id)
-    info = add(b"<< /Title (Pure PDF Viewer \\226 Sample Document) "
+    info = add(b"<< /Title (PDF Viewer \\226 Sample Document) "
                b"/Producer (tools/make-sample-pdf.py) >>")
 
     # Serialize, recording each object's byte offset for the xref table.

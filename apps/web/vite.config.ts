@@ -1,4 +1,4 @@
-import {defineConfig} from 'vite';
+import {defineConfig, normalizePath} from 'vite';
 import react from '@vitejs/plugin-react';
 import {viteStaticCopy} from 'vite-plugin-static-copy';
 import path from 'node:path';
@@ -18,7 +18,13 @@ export default defineConfig({
     // macOS app bundle. Copying (rather than importing) keeps the shared
     // package byte-identical across platforms.
     viteStaticCopy({
-      targets: [{src: path.join(repoRoot, 'packages/viewer/src/*'), dest: 'viewer'}],
+      targets: [
+        {
+          // fast-glob expects POSIX separators even when Vite runs on Windows.
+          src: normalizePath(path.join(repoRoot, 'packages/viewer/src/*')),
+          dest: 'viewer',
+        },
+      ],
     }),
   ],
   resolve: {

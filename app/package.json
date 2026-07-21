@@ -1,10 +1,12 @@
 {
-  "name": "PdfViewerApp",
+  "name": "@pdf-viewer/native",
   "version": "0.0.1",
   "private": true,
   "scripts": {
     "android": "react-native run-android",
     "ios": "react-native run-ios",
+    "windows": "powershell -NoProfile -ExecutionPolicy Bypass -File ../tools/run-windows.ps1",
+    "windows:build": "node ../tools/build-windows.js",
     "lint": "eslint .",
     "start": "react-native start",
     "test": "jest"
@@ -16,10 +18,10 @@
     "@pdf-viewer/viewer": "0.1.0",
     "react": "18.3.1",
     "react-native-macos": "^0.76.12",
-    "react-native-webview": "^14.0.1"
+    "react-native-webview": "^14.0.1",
+    "react-native-windows": "^0.76.16"
   },
   "devDependencies": {
-    "@react-native/community-cli-plugin": "0.76.5",
     "@babel/core": "^7.25.2",
     "@babel/preset-env": "^7.25.3",
     "@babel/runtime": "^7.25.0",
@@ -27,6 +29,7 @@
     "@react-native-community/cli-platform-android": "15.0.1",
     "@react-native-community/cli-platform-ios": "15.0.1",
     "@react-native/babel-preset": "0.76.5",
+    "@react-native/community-cli-plugin": "0.76.5",
     "@react-native/eslint-config": "0.76.5",
     "@react-native/metro-config": "0.76.5",
     "@react-native/typescript-config": "0.76.5",
@@ -37,9 +40,17 @@
     "jest": "^29.6.3",
     "prettier": "2.8.8",
     "react-test-renderer": "18.3.1",
-    "typescript": "5.0.4"
+    "typescript": "5.0.4",
+    "metro-config": "^0.81.5"
   },
   "engines": {
     "node": ">=18"
+  },
+  "react-native-windows": {
+    "init-windows": {
+      "name": "PDFViewer",
+      "namespace": "PDFViewer",
+      "template": "old/uwp-cpp-app"
+    }
   }
 }

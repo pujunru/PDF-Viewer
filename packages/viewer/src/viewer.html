@@ -105,24 +105,58 @@
 <div id="loading">Loading engine…</div>
 <div id="error"></div>
 
+<script>
+if (typeof globalThis === 'undefined') {
+  window.globalThis = window;
+}
+if (!Promise.withResolvers) {
+  Promise.withResolvers = function () {
+    var resolve;
+    var reject;
+    var promise = new Promise(function (res, rej) {
+      resolve = res;
+      reject = rej;
+    });
+    return {promise: promise, resolve: resolve, reject: reject};
+  };
+}
+window.addEventListener('error', function (event) {
+  var loading = document.getElementById('loading');
+  var error = document.getElementById('error');
+  loading.style.display = 'none';
+  error.style.display = 'flex';
+  var location = event.filename
+    ? ' (' + event.filename + ':' + event.lineno + ':' + event.colno + ')'
+    : '';
+  error.textContent = 'Could not start PDF viewer: ' +
+    (event.message || 'Unknown script error') + location;
+});
+</script>
 <script type="module">
 import * as pdfjsLib from './build/pdf.mjs';
 pdfjsLib.GlobalWorkerOptions.workerSrc = './build/pdf.worker.mjs';
 
 // ---- bridge to the host shell ----
-// This document is hosted two ways: inside a react-native-webview (macOS) and
-// inside an <iframe> (web). Both deliver inbound messages as 'message' events,
-// so only the outbound channel has to be chosen — RN exposes
-// ReactNativeWebView.postMessage; in a frame we post to the parent window.
-const RN = window.ReactNativeWebView;
-const post = RN && RN.postMessage
-  ? (type, payload) => RN.postMessage(JSON.stringify({ type, payload }))
-  : (type, payload) => window.parent.postMessage(
-      JSON.stringify({ type, payload }),
-      // The shell serves this document from its own origin; posting back to
-      // that same origin keeps the message from leaking to a foreign embedder.
-      window.location.origin,
-    );
+// This document is hosted three ways: inside a WebView2 control (Windows),
+// inside a react-native-webview WKWebView (macOS), and inside an <iframe>
+// (web). The outbound channel is resolved per call because the WKWebView
+// bridge (window.ReactNativeWebView) is injected asynchronously on some hosts;
+// resolving late means an early post() still lands once the channel exists.
+//   * WebView2 exposes window.chrome.webview from document start, with proper
+//     two-way messaging (chrome.webview.postMessage out; the host's
+//     PostWebMessageAsString delivered as a 'message' event on chrome.webview).
+//   * WKWebView exposes window.ReactNativeWebView.postMessage.
+//   * In a frame we post to the parent window.
+function post(type, payload) {
+  const body = JSON.stringify({ type, payload });
+  const cw = window.chrome && window.chrome.webview;
+  if (cw && cw.postMessage) { cw.postMessage(body); return; }
+  const RN = window.ReactNativeWebView;
+  if (RN && RN.postMessage) { RN.postMessage(body); return; }
+  // The shell serves this document from its own origin; posting back to that
+  // same origin keeps the message from leaking to a foreign embedder.
+  window.parent.postMessage(body, window.location.origin);
+}
 function onMessage(handler) {
   const dispatch = (e) => {
     let data = e.data;
@@ -132,6 +166,9 @@ function onMessage(handler) {
   };
   window.addEventListener('message', dispatch);
   document.addEventListener('message', dispatch); // Android/macOS quirk
+  // WebView2 delivers host->page messages on chrome.webview, not window.
+  const cw = window.chrome && window.chrome.webview;
+  if (cw && cw.addEventListener) cw.addEventListener('message', dispatch);
 }
 
 // ---- state ----

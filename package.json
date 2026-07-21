@@ -13,8 +13,11 @@
     "react-dom": "18.3.1"
   },
   "scripts": {
+    "postinstall": "node tools/patch-react-native-webview.js",
     "web": "npm run dev --workspace @pdf-viewer/web",
     "web:build": "npm run build --workspace @pdf-viewer/web",
-    "macos": "npm run macos --workspace PdfViewerApp"
+    "macos": "npm run macos --workspace @pdf-viewer/native",
+    "windows": "npm run windows --workspace @pdf-viewer/native",
+    "windows:build": "node tools/build-windows.js"
   }
 }

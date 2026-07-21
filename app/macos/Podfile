@@ -20,7 +20,7 @@ require_relative File.join(node_package_dir('@react-native-community/cli-platfor
 
 prepare_react_native_project!
 
-target 'PdfViewerApp-macOS' do
+target 'PDFViewer-macOS' do
   platform :macos, '11.0'
   use_native_modules!
 

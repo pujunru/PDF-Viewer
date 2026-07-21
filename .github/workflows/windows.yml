@@ -1,0 +1,60 @@
+name: Windows
+
+on:
+  push:
+    branches: [main, codex/react-native-windows]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # Also applies the react-native-webview Windows patch via the root
+      # postinstall (tools/patch-react-native-webview.js).
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test shared UI
+        run: npm test --workspace @pdf-viewer/native -- --runInBand
+
+      - name: Typecheck (native)
+        working-directory: app
+        run: npx tsc --noEmit -p tsconfig.json
+
+      - name: Typecheck (web)
+        run: npm run typecheck --workspace @pdf-viewer/web
+
+      # Builds the Windows-specific pdf.js viewer bundle and the UWP app in one
+      # step (tools/build-windows.js runs buildWindowsViewer() then MSBuild).
+      # --release embeds the JS bundle so the package runs without Metro. The
+      # x64-hosted toolchain (set inside the script) is required or Folly's
+      # Release optimization overflows the 32-bit compiler heap (C1076).
+      - name: Build Windows Release
+        run: node tools/build-windows.js --release
+
+      - name: Upload package layout
+        uses: actions/upload-artifact@v4
+        with:
+          name: PDF-Viewer-Windows-x64
+          path: app/windows/x64/Release/PDFViewer
+          if-no-files-found: error
+
+      - name: Upload MSIX installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: PDF-Viewer-Windows-x64-msix
+          path: app/windows/AppPackages/PDFViewer/**/*.msix
+          if-no-files-found: error

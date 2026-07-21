@@ -9,10 +9,9 @@ export type Tab = {
   pageCount: number;
   ready: boolean;
   /**
-   * Where the document came from. On macOS this is a filesystem path; on web
-   * there are no paths, so it holds the picked file's name (or null when the
-   * bundled sample is showing). Neither shell dereferences it — it exists so
-   * "save" can tell "overwrite the original" from "save as".
+   * Where the document came from. It is a filesystem path on macOS, an opaque
+   * StorageFile token on Windows, and a picked-file name on web. The shell does
+   * not dereference it; it distinguishes "save" from "save as".
    */
   path: string | null;
   /** Bytes waiting for the viewer to signal ready. */

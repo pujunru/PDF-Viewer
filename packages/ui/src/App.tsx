@@ -1,5 +1,5 @@
 /**
- * Pure PDF Viewer — the application shell, shared by every platform.
+ * PDF Viewer — the application shell, shared by every platform.
  *
  * Tabs + toolbar + one viewport per document. Everything platform-specific is
  * injected: how files are picked (`files`) and where the viewer document lives

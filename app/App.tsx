@@ -1,22 +1,30 @@
 /**
- * Pure PDF Viewer — macOS entry point.
+ * PDF Viewer — macOS and Windows entry point.
  *
  * The shell, its components and its styles all live in the shared packages and
  * are identical to the web build. This file supplies only what is native: the
- * NSOpenPanel/NSSavePanel-backed file service, and the file:// URL of the
- * viewer document inside the app bundle.
+ * platform file service and the URL of the viewer document in the app bundle.
  */
 import React from 'react';
-import {NativeModules} from 'react-native';
+import {NativeModules, Platform} from 'react-native';
 import App from '@pdf-viewer/ui/src/App';
-import {macFileService} from './src/fileService';
+import {nativeFileService} from './src/fileService';
 
-// Native constant: file:// URL to the bundled pdf.js viewer. It is loaded from
-// the bundle so its siblings — build/*.mjs, web/*, sample.pdf — resolve via
-// relative URLs.
+// Windows serves the packaged viewer assets to the Chromium WebView2 through a
+// virtual host mapped to the install folder (see the react-native-webview
+// SetVirtualHostNameToFolderMapping patch); ms-appx-web:// only works on the
+// deprecated EdgeHTML WebView. macOS resolves the copied resource through
+// BundleResources.
 const {BundleResources} = NativeModules;
-const VIEWER_URL: string = (BundleResources && BundleResources.viewerURL) || '';
+const VIEWER_URL: string =
+  Platform.OS === 'windows'
+    ? 'https://assets.pdfviewer/Assets/pdfjs/viewer.windows.html'
+    : (BundleResources && BundleResources.viewerURL) || '';
+
+if (__DEV__) {
+  console.log('[PDF Viewer] viewer URL:', VIEWER_URL || '<missing>');
+}
 
 export default function Root(): React.JSX.Element {
-  return <App files={macFileService} viewerUrl={VIEWER_URL} />;
+  return <App files={nativeFileService} viewerUrl={VIEWER_URL} />;
 }

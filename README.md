@@ -1,7 +1,7 @@
-# Pure PDF Viewer
+# PDF Viewer
 
-A PDF viewer with tabs, search, and annotation, running as a **macOS app** and a
-**web app** from one codebase.
+A PDF viewer with tabs, search, and annotation, running as native **Windows**
+and **macOS** apps plus a **web app** from one codebase.
 
 **[Try the web app →](https://pujunru.github.io/PDF-Viewer/)**
 
@@ -19,7 +19,7 @@ packages/
   viewer/    The pdf.js viewer document and its assets
 apps/
   web/       Web entry point (Vite + react-native-web)
-app/         macOS entry point (react-native-macos)
+app/         Windows + macOS entry point (React Native Windows/macOS)
 tools/       Build-time helpers (sample document generator)
 ```
 
@@ -33,10 +33,10 @@ in what they inject into it.
 
 Two things genuinely cannot be shared, and both are isolated behind an interface:
 
-| Concern | macOS | Web |
-|---|---|---|
-| **File access** (`FileService`) | `NSOpenPanel` / `NSSavePanel` via a native module | File System Access API, falling back to `<input type=file>` on Safari/Firefox |
-| **Viewer host** (`PdfViewport`) | `react-native-webview` | same-origin `<iframe>` |
+| Concern | Windows | macOS | Web |
+|---|---|---|---|
+| **File access** (`FileService`) | `FileOpenPicker` / `FileSavePicker` native module | `NSOpenPanel` / `NSSavePanel` native module | File System Access API, falling back to `<input type=file>` |
+| **Viewer host** (`PdfViewport`) | `react-native-webview` | `react-native-webview` | same-origin `<iframe>` |
 
 `PdfViewport` is resolved by platform extension (`.native.tsx` / `.web.tsx`) —
 RN's own convention, taught to Vite via `resolve.extensions`. Both
@@ -57,6 +57,8 @@ npm run web          # web dev server on :5173
 npm run web:build    # production build
 
 npm run macos        # macOS app
+npm run windows       # build, register, start Metro, and launch Windows (x64 Debug)
+npm run windows:build # build the Windows package without launching it
 cd app && npx jest   # tests
 
 python3 tools/make-sample-pdf.py   # regenerate the bundled sample document
@@ -68,10 +70,11 @@ python3 tools/make-sample-pdf.py   # regenerate the bundled sample document
 |---|---|
 | `web.yml` | Type-checks and builds the web app; deploys it to GitHub Pages on `main` |
 | `macos.yml` | Builds the macOS app and uploads the unsigned `.app` as an artifact |
+| `windows.yml` | Tests and builds the x64 Windows package layout |
 
 The macOS artifact is **unsigned** — macOS will refuse to open it on first
 launch. Right-click the app and choose *Open* to run it anyway, or clear the
-quarantine flag with `xattr -dr com.apple.quarantine PdfViewerApp.app`.
+quarantine flag with `xattr -dr com.apple.quarantine PDFViewer.app`.
 
 ## Notes
 

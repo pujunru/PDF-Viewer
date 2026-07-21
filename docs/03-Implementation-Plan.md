@@ -1,4 +1,4 @@
-# Implementation Plan — Pure PDF Viewer
+# Implementation Plan — PDF Viewer
 
 **Version:** 1.0
 **Date:** 2026-07-17

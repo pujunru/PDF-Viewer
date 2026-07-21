@@ -1,59 +1,64 @@
+const {getDefaultConfig, mergeConfig} = require('@react-native/metro-config');
+
 const fs = require('fs');
 const path = require('path');
-const {getDefaultConfig, mergeConfig} = require('@react-native/metro-config');
+const exclusionList = require('metro-config/src/defaults/exclusionList');
 
 const projectRoot = __dirname;
 const repoRoot = path.resolve(projectRoot, '..');
-
-// Located rather than hardcoded: npm may hoist this to the repo root or keep it
-// in the app's own tree depending on how the workspace resolves.
-const reactNativeMacOS = path.dirname(
-  require.resolve('react-native-macos/package.json', {paths: [projectRoot]}),
+const rnwPath = fs.realpathSync(
+  path.dirname(
+    require.resolve('react-native-windows/package.json', {paths: [projectRoot]}),
+  ),
+);
+const rnmacPath = fs.realpathSync(
+  path.dirname(
+    require.resolve('react-native-macos/package.json', {paths: [projectRoot]}),
+  ),
 );
 
 /**
  * Metro configuration
- * https://reactnative.dev/docs/metro
- *
- * The shell lives in the workspace packages (@pdf-viewer/*), which sit outside
- * this app directory, so Metro has to watch the repo root and resolve modules
- * from both node_modules trees (npm hoists most deps to the root, but keeps
- * react-native-macos here).
+ * https://facebook.github.io/metro/docs/configuration
  *
  * @type {import('metro-config').MetroConfig}
  */
+
 const config = {
   watchFolders: [repoRoot],
   resolver: {
+    blockList: exclusionList([
+      // This stops "npx @react-native-community/cli run-windows" from causing the metro server to crash if its already running
+      new RegExp(
+        `${path.resolve(__dirname, 'windows').replace(/[/\\]/g, '/')}.*`,
+      ),
+      // This prevents "npx @react-native-community/cli run-windows" from hitting: EBUSY: resource busy or locked, open msbuild.ProjectImports.zip or other files produced by msbuild
+      new RegExp(`${rnwPath}/build/.*`),
+      new RegExp(`${rnwPath}/target/.*`),
+      /.*\.ProjectImports\.zip/,
+    ]),
     nodeModulesPaths: [
       path.join(projectRoot, 'node_modules'),
       path.join(repoRoot, 'node_modules'),
     ],
-    /**
-     * The shared packages import 'react-native'; on this platform that has to
-     * be react-native-macos, which npm installs into this app's own tree.
-     *
-     * A plain object here would shadow resolution for *every* bare import,
-     * so anything not listed (@babel/runtime, react, the pdf.js deps) would
-     * fail to resolve. The proxy overrides only the one name and lets Metro
-     * fall back to nodeModulesPaths for the rest.
-     */
-    extraNodeModules: new Proxy(
-      {'react-native': reactNativeMacOS},
-      {
-        get: (target, name) => {
-          if (name in target) {
-            return target[name];
-          }
-          // npm hoists most packages to the repo root but keeps some here, so
-          // the fallback has to check this app's tree before the root's.
-          const local = path.join(projectRoot, 'node_modules', String(name));
-          return fs.existsSync(local)
-            ? local
-            : path.join(repoRoot, 'node_modules', String(name));
-        },
+    resolveRequest: (context, moduleName, platform) => {
+      // Every shared package imports the canonical `react-native` name. Route
+      // that name, including deep imports, to the runtime for this bundle.
+      if (moduleName === 'react-native' || moduleName.startsWith('react-native/')) {
+        const runtime = platform === 'windows' ? rnwPath : rnmacPath;
+        const suffix = moduleName.slice('react-native'.length);
+        return context.resolveRequest(context, `${runtime}${suffix}`, platform);
+      }
+      return context.resolveRequest(context, moduleName, platform);
+    },
+  },
+  transformer: {
+    getTransformOptions: async () => ({
+      transform: {
+        experimentalImportSupport: false,
+        inlineRequires: true,
       },
-    ),
+    }),
   },
 };
 

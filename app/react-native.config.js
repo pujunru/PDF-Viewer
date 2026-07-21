@@ -1,19 +1,18 @@
 const path = require('path');
 
 /**
- * In the workspace, npm hoists a vanilla `react-native` to the repo root (it
- * arrives as a transitive dependency) while this app's actual runtime,
- * react-native-macos, stays in its own node_modules. The CLI autodetects the
- * former and then reports no platforms and no commands — which is why
- * `start` / `run-macos` go missing.
- *
- * Pointing reactNativePath at the macOS fork restores both.
+ * This app has two native React Native runtimes. Select the fork that owns the
+ * command being run so the community CLI loads the corresponding platform
+ * commands instead of the vanilla `react-native` package npm hoists.
  */
+const command = process.argv.join(' ');
+const isWindows = /(?:init|run|autolink)-windows|--platform[ =]windows/.test(
+  command,
+);
+const runtime = isWindows ? 'react-native-windows' : 'react-native-macos';
+
 module.exports = {
-  // Resolved rather than joined: npm may hoist react-native-macos to the repo
-  // root or keep it in this app's tree, and a hardcoded path silently points
-  // at nothing when it lands in the other one.
   reactNativePath: path.dirname(
-    require.resolve('react-native-macos/package.json', {paths: [__dirname]}),
+    require.resolve(`${runtime}/package.json`, {paths: [__dirname]}),
   ),
 };
