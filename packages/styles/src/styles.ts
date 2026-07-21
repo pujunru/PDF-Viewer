@@ -7,7 +7,7 @@
  * those comments describe RN-macOS quirks and are why the web build inherits
  * some geometry that looks over-specified for a browser.
  */
-import {StyleSheet} from 'react-native';
+import {Platform, StyleSheet} from 'react-native';
 import {
   color,
   metrics,
@@ -18,6 +18,16 @@ import {
   sketchTilt,
 } from './tokens';
 
+// `fontFamily` is a CSS font stack: the browser (web) and macOS both resolve
+// the sketch face or its Comic Sans MS fallback from it. Windows renders text
+// through XAML, which does not understand CSS stacks and would silently drop
+// to Segoe UI, so Windows is given a single concrete family it ships — the
+// same Comic Sans MS the macOS build lands on — to keep the hand-drawn look.
+const sketchFontFamily = Platform.select({
+  windows: 'Comic Sans MS',
+  default: fontFamily,
+});
+
 /**
  * Every piece of text in the shell is the sketch face at weight 700 — the
  * design uses no other family and no other weight. Spread into each text style
@@ -25,7 +35,7 @@ import {
  * down the view tree the way CSS does, so a parent-level declaration would
  * silently apply on web and not on macOS.
  */
-const sketchText = {fontFamily, fontWeight: fontWeightSketch} as const;
+const sketchText = {fontFamily: sketchFontFamily, fontWeight: fontWeightSketch} as const;
 
 export const styles = StyleSheet.create({
   root: {flex: 1, backgroundColor: color.titlebar},
