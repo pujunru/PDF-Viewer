@@ -206,6 +206,11 @@ export const styles = StyleSheet.create({
     padding: 0,
     margin: 0,
     lineHeight: 16,
+    // The pill is a dashed outline over the dark toolbar, so the field itself
+    // must be transparent. Windows renders TextInput as a native XAML TextBox
+    // whose default background is opaque white; without this it paints a white
+    // well that swallows the light placeholder text.
+    backgroundColor: 'transparent',
     // react-native-web renders TextInput as a real <input>, which brings a UA
     // focus ring the dark field doesn't want.
     outlineStyle: 'none',

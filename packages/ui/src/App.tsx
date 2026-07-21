@@ -106,17 +106,22 @@ export default function App({files, viewerUrl}: AppProps): React.JSX.Element {
   // "+" opens the platform file dialog; a new tab is only created once a PDF is
   // actually chosen (cancelling the dialog leaves tabs untouched).
   const addTab = async () => {
-    const picked = await files.openPDF();
-    if (!picked) {
-      return; // user cancelled
+    try {
+      const picked = await files.openPDF();
+      if (!picked) {
+        return; // user cancelled
+      }
+      const t = newTab({
+        title: picked.name,
+        path: picked.path,
+        pendingBase64: picked.base64,
+      });
+      setTabs(ts => [...ts, t]);
+      setActiveId(t.id);
+    } catch (err) {
+      // A native picker failure should not take down the shell.
+      console.error('[PDF Viewer] Could not open a PDF:', String(err));
     }
-    const t = newTab({
-      title: picked.name,
-      path: picked.path,
-      pendingBase64: picked.base64,
-    });
-    setTabs(ts => [...ts, t]);
-    setActiveId(t.id);
   };
 
   const pickTool = (t: Tool) => {
